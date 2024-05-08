@@ -5217,3 +5217,12 @@ WARNING: Unmatched cancel notification for request id 3
 2024.05.08 19:15:30 INFO  compiling weatherappdb_f4dd477a3a (1 scala source)
 2024.05.08 19:15:30 INFO  time: compiled weatherAppDB_f4dd477a3a in 0.39s
 2024.05.08 19:15:32 INFO  time: indexed workspace in 2.14s
+May 08, 2024 7:21:41 PM org.eclipse.lsp4j.jsonrpc.RemoteEndpoint handleCancellation
+WARNING: Unmatched cancel notification for request id 43
+2024.05.08 19:22:03 INFO  Cancelling compilation on scala-cli server
+2024.05.08 19:22:03 INFO  compiling weatherappdb_f4dd477a3a (1 scala source)
+2024.05.08 19:22:03 INFO  time: compiled weatherAppDB_f4dd477a3a in 0.46s
+2024.05.08 19:22:03 INFO  time: Imported build in 0.54s
+2024.05.08 19:22:04 INFO  time: Imported build in 0.54s
+2024.05.08 19:22:07 INFO  time: indexed workspace in 3.15s
+2024.05.08 19:22:07 INFO  time: indexed workspace in 3.13s
