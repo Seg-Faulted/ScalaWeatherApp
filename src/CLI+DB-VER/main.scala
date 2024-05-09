@@ -7,7 +7,7 @@ import scala.io.StdIn._
 import sttp.client3.upicklejson._
 import upickle.default._
 import scala.collection.mutable
-import java.sql.{Connection, DriverManager, Statement, SQLException}
+import java.sql.{Connection, DriverManager, Statement, SQLException, PreparedStatement}
 
 def main(args: Array[String]): Unit = {
   val url =
@@ -56,22 +56,24 @@ def main(args: Array[String]): Unit = {
     select
     count(*)
     from
-    WeatherLocations
+    weatherlocations
     where
-    CITY = '$CITY'
-    and STATE = '$STATE'
-    and COUNTRY_CODE = '$COUNTRY';"""
+    city = '$CITY'
+    and state = '$STATE'
+    and country = '$COUNTRY';
+    """
     val resultSet = statement.executeQuery(checkCITYSTATEQuery)
     resultSet.next()
     val x: Int = resultSet.getInt(1)
     if (x > 0) {
       println(s"$CITY, $STATE, $COUNTRY exists in the database.")
     } else {
-      println(s"$CITY, $STATE, $COUNTRY" +  "\n\n does not exist in the database, so, it will attempt to fetch it manually.")
-        GeoNameRequest(CITY, STATE, COUNTRY)
+      println(
+        s"$CITY, $STATE, $COUNTRY" + "\n\n does not exist in the database, so, it will attempt to fetch it manually."
+      )
+      GeoNameRequest(CITY, STATE, COUNTRY)
     }
 
-  
   }
 
   def GeoNameRequest(
@@ -93,17 +95,17 @@ def main(args: Array[String]): Unit = {
       case Right(body) => ujson.read(body)
       case Left(error) => throw new Exception(s"Failed to fetch data: $error")
     }
-    val lat = GEONAMEjsonData("geonames")(0)("lat").str.toDouble
-    val long = GEONAMEjsonData("geonames")(0)("lng").str.toDouble
-    "pass"
-    NWSLATLONGRequest(lat, long)
+    val latitude = GEONAMEjsonData("geonames")(0)("lat").str.toDouble
+    val longitude = GEONAMEjsonData("geonames")(0)("lng").str.toDouble
+
+    NWSLATLONGRequest(latitude, longitude)
   }
   def NWSLATLONGRequest(
-      lat: Double,
-      long: Double
+      latitude: Double,
+      longitude: Double
   ): String = {
     val NationalWeatherServiceLATLONGRequest =
-      basicRequest.get(uri"https://api.weather.gov/points/$lat,$long")
+      basicRequest.get(uri"https://api.weather.gov/points/$latitude,$longitude")
     val NationalWeatherServiceLATLONGBackend = HttpClientSyncBackend()
     val NationalWeatherServiceLATLONGResponse =
       NationalWeatherServiceLATLONGRequest.send(
@@ -122,12 +124,24 @@ def main(args: Array[String]): Unit = {
       NWSjsonData("properties")("gridY").num.toInt.toString
 
     s"Forecast Office: $forecastOffice, GridX: $gridX, GridY: $gridY"
-    NWSGRIDPOINTSRequest(forecastOffice, gridX, gridY)
+    NWSGRIDPOINTSRequest(
+      forecastOffice: String,
+      gridX: String,
+      gridY: String,
+      latitude: Double,
+      longitude: Double,
+      gridX: String,
+      gridY: String
+    )
   }
   def NWSGRIDPOINTSRequest(
       forecastOffice: String,
       gridX: String,
-      gridY: String
+      gridY: String,
+      latitude: Double,
+      longitude: Double,
+      gridX$1: String,
+      gridY$1: String
   ): String = {
     val NationalWeatherServiceGRIDPOINTSRequest = basicRequest
       .get(
@@ -145,15 +159,76 @@ def main(args: Array[String]): Unit = {
       }
 
     "Data fetched successfully"
-    NWSweatherRequest(NationalWeatherServiceGRIDPOINTSJsonData)
+    NWSweatherRequest(
+      NationalWeatherServiceGRIDPOINTSJsonData,
+      latitude,
+      longitude,
+      gridX,
+      gridY,
+      forecastOffice
+    )
   }
-  def NWSweatherRequest(NationalWeatherServiceGRIDPOINTSJsonData: ujson.Value): String = {
-  val statusOfCurrentDay: String = NationalWeatherServiceGRIDPOINTSJsonData(
-    "properties"
-  )("periods")(0)("shortForecast").str
-  val temperature = NationalWeatherServiceGRIDPOINTSJsonData("properties")("periods")(0)("temperature").num.toInt
-  println(s"Today's weather forecast: $statusOfCurrentDay")
-  println(s"Today's temperature: $temperature")
-  "Weather data fetched successfully" // Added a return statement for the function
-}
+  def NWSweatherRequest(
+      NationalWeatherServiceGRIDPOINTSJsonData: ujson.Value,
+      latitude: Double,
+      longitude: Double,
+      gridX: String,
+      gridY: String,
+      forecastOffice: String
+  ): String = {
+    val statusOfCurrentDay: String = NationalWeatherServiceGRIDPOINTSJsonData(
+      "properties"
+    )("periods")(0)("shortForecast").str
+    val temperature = NationalWeatherServiceGRIDPOINTSJsonData("properties")(
+      "periods"
+    )(0)("temperature").num.toInt
+    println(s"Today's weather forecast: $statusOfCurrentDay")
+    println(s"Today's temperature: $temperature")
+
+    AddToDatabase(
+      CITY,
+      STATE,
+      COUNTRY,
+      latitude,
+      longitude,
+      gridX,
+      gridY,
+      forecastOffice,
+      url,
+      username,
+      password
+    )
+    "test"
+  }
+
+  def AddToDatabase(
+      CITY: String,
+      STATE: String,
+      COUNTRY: String,
+      latitude: Double,
+      longitude: Double,
+      gridX: String,
+      gridY: String,
+      forecastOffice: String,
+      url: String,
+      username: String,
+      password: String
+  ): Unit = {
+    val connection: Connection =
+      DriverManager.getConnection(url, username, password)
+    val statement: Statement = connection.createStatement()
+
+
+  
+    val sqlInsertStatement = s"""insert into public.weatherlocations (city, state,country,latitude,longtitude,gridx,gridy,forecastoffice)
+    values ('$CITY','$STATE','$COUNTRY','$latitude','$longitude','$gridX','$gridY','$forecastOffice')"""
+  //print(s"$sqlInsertStatement")
+  
+ 
+    val resultSet = statement.executeQuery(sqlInsertStatement)
+    resultSet.next()
+   // val x: Int = resultSet.getInt(1)
+       connection.close()
+       System.exit(0)
+  }
 }
