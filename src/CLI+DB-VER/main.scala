@@ -7,20 +7,96 @@ import scala.io.StdIn._
 import sttp.client3.upicklejson._
 import upickle.default._
 import scala.collection.mutable
-import java.sql.{Connection, DriverManager, Statement, SQLException, PreparedStatement}
+import java.sql.{
+  Connection,
+  DriverManager,
+  Statement,
+  SQLException,
+  PreparedStatement
+}
+
+def CheckIfCityStateCountryExists(
+    CITY: String,
+    STATE: String,
+    COUNTRY: String,
+    statement: Statement // Add this parameter
+): Boolean = {
+  val checkCITYSTATEQuery = s"""
+  select
+  count(*)
+  from
+  weatherlocations
+  where
+  city = '$CITY'
+  and state = '$STATE'
+  and country = '$COUNTRY';
+  """
+  val resultSet = statement.executeQuery(checkCITYSTATEQuery)
+  resultSet.next()
+  val count: Int = resultSet.getInt(1)
+  if (count > 0) {
+    println(
+      s"$CITY, $STATE, $COUNTRY exists in the database.\nAttempting to fetch resources from the database."
+    )
+    val RetrieveGRIDS = s"""
+    select
+    gridx,
+    gridy,
+    forecastoffice
+    from
+    weatherlocations
+    where
+    city = '$CITY'
+    and state = '$STATE'
+    and country = '$COUNTRY';
+    
+    """
+    val resultSet = statement.executeQuery(RetrieveGRIDS)
+    resultSet.next()
+    val gridXretrieved: String = resultSet.getString(1)
+    val gridYretrieved: String = resultSet.getString(2)
+    val FORECASTOFFICE: String = resultSet.getString(3)
+
+    val NWSGRIDPOINTSRequest = basicRequest.get(
+      uri"https://api.weather.gov/gridpoints/$FORECASTOFFICE/$gridXretrieved,$gridYretrieved/forecast"
+    )
+    val NWSBackend = HttpClientSyncBackend()
+    val NWSResponse = NWSGRIDPOINTSRequest.send(NWSBackend)
+    val NWSjsonData = NWSResponse.body match {
+      case Right(body) => ujson.read(body)
+      case Left(error) => throw new Exception(s"Failed to fetch data: $error")
+    }
+
+    val Temperature =
+      NWSjsonData("properties")("periods")(0)("temperature").num.toString
+    val TemperatureUnit =
+      NWSjsonData("properties")("periods")(0)("temperatureUnit").str
+    val Forecast =
+      NWSjsonData("properties")("periods")(0)("shortForecast").str
+    val Precipitation = NWSjsonData("properties")("periods")(0)(
+      "probabilityOfPrecipitation"
+    )("value").toString
+    println(s"$Temperature")
+    println(s"$TemperatureUnit")
+    println(s"$Forecast")
+    println(
+      s"\nResults for Today: \nThe temperature is: $Temperature $TemperatureUnit.\n\nForecast: $Forecast\n The chance of precipitation is: $Precipitation%\n\n"
+    )
+
+    true
+  } else {
+    println(
+      s"$CITY, $STATE, $COUNTRY" + "\n\n does not exist in the database.\nAttempting to build sources manually."
+    )
+    false
+  }
+}
 
 def main(args: Array[String]): Unit = {
   val url =
     "jdbc:postgresql://aws-0-us-west-1.pooler.supabase.com:5432/postgres?user=postgres.lsjjxfyijphiafssvcrl&password=babySharkSupa"
   val username = "postgres.lsjjxfyijphiafssvcrl"
   val password = "babySharkSupa"
-
-  val createTableQuery = """
-    CREATE TABLE IF NOT EXISTS HelloWorld (
-      id SERIAL PRIMARY KEY,
-      message TEXT
-    );
-  """
 
   println("---------")
   val CITY = readLine("Enter city: ").toUpperCase()
@@ -40,40 +116,13 @@ def main(args: Array[String]): Unit = {
   resultSet.next()
   val empty: Int = resultSet.getInt(1)
   if (empty > 0) {
-    println("Table is not empty.")
+    println("Table is not empty.\n")
   } else {
-    println("Table is empty.")
+    println("Table is empty.\n")
   }
-  CheckIfCityStateCountryExists(CITY, STATE, COUNTRY)
-
-  def CheckIfCityStateCountryExists(
-      CITY: String,
-      STATE: String,
-      COUNTRY: String
-  ): Unit = {
-
-    val checkCITYSTATEQuery = s"""
-    select
-    count(*)
-    from
-    weatherlocations
-    where
-    city = '$CITY'
-    and state = '$STATE'
-    and country = '$COUNTRY';
-    """
-    val resultSet = statement.executeQuery(checkCITYSTATEQuery)
-    resultSet.next()
-    val x: Int = resultSet.getInt(1)
-    if (x > 0) {
-      println(s"$CITY, $STATE, $COUNTRY exists in the database.")
-    } else {
-      println(
-        s"$CITY, $STATE, $COUNTRY" + "\n\n does not exist in the database, so, it will attempt to fetch it manually."
-      )
-      GeoNameRequest(CITY, STATE, COUNTRY)
-    }
-
+  val exists = CheckIfCityStateCountryExists(CITY, STATE, COUNTRY, statement) // Pass statement here
+  if (!exists) {
+    GeoNameRequest(CITY, STATE, COUNTRY)
   }
 
   def GeoNameRequest(
@@ -160,12 +209,12 @@ def main(args: Array[String]): Unit = {
 
     "Data fetched successfully"
     NWSweatherRequest(
-      NationalWeatherServiceGRIDPOINTSJsonData,
-      latitude,
-      longitude,
-      gridX,
-      gridY,
-      forecastOffice
+      NationalWeatherServiceGRIDPOINTSJsonData: ujson.Value,
+      latitude: Double,
+      longitude: Double,
+      gridX: String,
+      gridY: String,
+      forecastOffice: String
     )
   }
   def NWSweatherRequest(
@@ -182,8 +231,12 @@ def main(args: Array[String]): Unit = {
     val temperature = NationalWeatherServiceGRIDPOINTSJsonData("properties")(
       "periods"
     )(0)("temperature").num.toInt
+    val Precipitation = NationalWeatherServiceGRIDPOINTSJsonData("properties")(
+      "periods"
+    )(0)("probabilityOfPrecipitation")("value").toString
     println(s"Today's weather forecast: $statusOfCurrentDay")
-    println(s"Today's temperature: $temperature")
+    println(s"Today's temperature: $temperature F")
+    println(s"Today's precipitation: $Precipitation%")
 
     AddToDatabase(
       CITY,
@@ -217,18 +270,13 @@ def main(args: Array[String]): Unit = {
     val connection: Connection =
       DriverManager.getConnection(url, username, password)
     val statement: Statement = connection.createStatement()
-
-
-  
-    val sqlInsertStatement = s"""insert into public.weatherlocations (city, state,country,latitude,longtitude,gridx,gridy,forecastoffice)
+    val InsertNewDataIntoDatabase =
+      s"""insert into public.weatherlocations (city, state,country,latitude,longtitude,gridx,gridy,forecastoffice)
     values ('$CITY','$STATE','$COUNTRY','$latitude','$longitude','$gridX','$gridY','$forecastOffice')"""
-  //print(s"$sqlInsertStatement")
-  
- 
-    val resultSet = statement.executeQuery(sqlInsertStatement)
+    // print(s"$sqlInsertStatement")
+
+    val resultSet = statement.executeQuery(InsertNewDataIntoDatabase)
     resultSet.next()
-   // val x: Int = resultSet.getInt(1)
-       connection.close()
-       System.exit(0)
+    connection.close()
   }
 }
